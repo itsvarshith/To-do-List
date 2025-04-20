@@ -1,0 +1,597 @@
+// package.json
+{
+  "name": "vite-react-typescript-starter",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "npx vite",
+    "build": "vite build",
+    "lint": "eslint .",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@dnd-kit/core": "^6.1.0",
+    "@dnd-kit/sortable": "^8.0.0",
+    "@dnd-kit/utilities": "^3.2.2",
+    "clsx": "^2.1.0",
+    "framer-motion": "^11.0.8",
+    "lucide-react": "^0.344.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "zustand": "^4.5.2"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.9.1",
+    "@types/react": "^18.3.5",
+    "@types/react-dom": "^18.3.0",
+    "@vitejs/plugin-react": "^4.3.1",
+    "autoprefixer": "^10.4.18",
+    "eslint": "^9.9.1",
+    "eslint-plugin-react-hooks": "^5.1.0-rc.0",
+    "eslint-plugin-react-refresh": "^0.4.11",
+    "globals": "^15.9.0",
+    "postcss": "^8.4.35",
+    "tailwindcss": "^3.4.1",
+    "typescript": "^5.5.3",
+    "typescript-eslint": "^8.3.0",
+    "vite": "^5.4.2"
+  }
+}
+
+// src/types.ts
+export interface Todo {
+  id: string;
+  text: string;
+  completed: boolean;
+  categoryId: string;
+}
+
+export interface Category {
+  id: string;
+  name: string;
+  color: string;
+}
+
+// src/store.ts
+import { create } from 'zustand';
+import { Category, Todo } from './types';
+
+interface TodoStore {
+  todos: Todo[];
+  categories: Category[];
+  userName: string;
+  hasCompletedOnboarding: boolean;
+  addTodo: (text: string, categoryId: string) => void;
+  toggleTodo: (id: string) => void;
+  deleteTodo: (id: string) => void;
+  reorderTodos: (todos: Todo[]) => void;
+  addCategory: (name: string, color: string) => void;
+  deleteCategory: (id: string) => void;
+  setUserName: (name: string) => void;
+  completeOnboarding: () => void;
+}
+
+export const useTodoStore = create<TodoStore>((set) => ({
+  todos: [],
+  categories: [
+    { id: '1', name: 'Personal', color: '#3b82f6' },
+    { id: '2', name: 'Work', color: '#ef4444' },
+    { id: '3', name: 'Shopping', color: '#10b981' },
+  ],
+  userName: '',
+  hasCompletedOnboarding: false,
+  addTodo: (text, categoryId) =>
+    set((state) => ({
+      todos: [
+        ...state.todos,
+        {
+          id: crypto.randomUUID(),
+          text,
+          completed: false,
+          categoryId,
+        },
+      ],
+    })),
+  toggleTodo: (id) =>
+    set((state) => ({
+      todos: state.todos.map((todo) =>
+        todo.id === id ? { ...todo, completed: !todo.completed } : todo
+      ),
+    })),
+  deleteTodo: (id) =>
+    set((state) => ({
+      todos: state.todos.filter((todo) => todo.id !== id),
+    })),
+  reorderTodos: (todos) => set({ todos }),
+  addCategory: (name, color) =>
+    set((state) => ({
+      categories: [...state.categories, { id: crypto.randomUUID(), name, color }],
+    })),
+  deleteCategory: (id) =>
+    set((state) => ({
+      categories: state.categories.filter((category) => category.id !== id),
+      todos: state.todos.filter((todo) => todo.categoryId !== id),
+    })),
+  setUserName: (name) => set({ userName: name }),
+  completeOnboarding: () => set({ hasCompletedOnboarding: true }),
+}));
+
+// src/components/AddTodo.tsx
+import { FormEvent, useState } from 'react';
+import { Plus } from 'lucide-react';
+import { motion } from 'framer-motion';
+import { useTodoStore } from '../store';
+
+export function AddTodo({ categoryId }: { categoryId: string }) {
+  const [text, setText] = useState('');
+  const { addTodo } = useTodoStore();
+
+  const handleSubmit = (e: FormEvent) => {
+    e.preventDefault();
+    if (!text.trim()) return;
+    addTodo(text.trim(), categoryId);
+    setText('');
+  };
+
+  return (
+    <form onSubmit={handleSubmit} className="flex gap-2">
+      <input
+        type="text"
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        placeholder="Add a new task..."
+        className="flex-1 px-4 py-2 rounded-lg bg-slate-800/50 border border-slate-700/50 text-slate-100 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-transparent"
+      />
+      <motion.button
+        type="submit"
+        whileHover={{ scale: 1.05 }}
+        whileTap={{ scale: 0.95 }}
+        className="px-4 py-2 bg-blue-500/20 border border-blue-500/50 text-blue-400 rounded-lg hover:bg-blue-500/30 focus:outline-none focus:ring-2 focus:ring-blue-500/50 transition-colors duration-200"
+      >
+        <Plus className="w-5 h-5" />
+      </motion.button>
+    </form>
+  );
+}
+
+// src/components/TodoItem.tsx
+import { useSortable } from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
+import { Check, Grip, Trash2 } from 'lucide-react';
+import { motion } from 'framer-motion';
+import { useTodoStore } from '../store';
+import { Todo } from '../types';
+import clsx from 'clsx';
+
+export function TodoItem({ todo }: { todo: Todo }) {
+  const { toggleTodo, deleteTodo } = useTodoStore();
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id: todo.id });
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+  };
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, scale: 0.95 }}
+      ref={setNodeRef}
+      style={style}
+      className={clsx(
+        'flex items-center gap-2 glass rounded-lg p-3',
+        isDragging && 'opacity-50'
+      )}
+    >
+      <button
+        {...attributes}
+        {...listeners}
+        className="touch-none cursor-grab active:cursor-grabbing"
+      >
+        <Grip className="w-5 h-5 text-slate-400" />
+      </button>
+      <motion.button
+        whileTap={{ scale: 0.9 }}
+        onClick={() => toggleTodo(todo.id)}
+        className={clsx(
+          'flex items-center justify-center w-5 h-5 rounded border transition-colors duration-200',
+          todo.completed ? 'bg-blue-500/50 border-blue-500' : 'border-slate-600 hover:border-blue-500/50'
+        )}
+      >
+        {todo.completed && <Check className="w-4 h-4 text-blue-200" />}
+      </motion.button>
+      <span
+        className={clsx(
+          'flex-1 transition-colors duration-200',
+          todo.completed && 'line-through text-slate-400'
+        )}
+      >
+        {todo.text}
+      </span>
+      <motion.button
+        whileHover={{ scale: 1.1 }}
+        whileTap={{ scale: 0.9 }}
+        onClick={() => deleteTodo(todo.id)}
+        className="text-slate-400 hover:text-red-400 transition-colors duration-200"
+      >
+        <Trash2 className="w-5 h-5" />
+      </motion.button>
+    </motion.div>
+  );
+}
+
+// src/components/TodoList.tsx
+import { DndContext, DragEndEvent, closestCenter } from '@dnd-kit/core';
+import {
+  SortableContext,
+  arrayMove,
+  verticalListSortingStrategy,
+} from '@dnd-kit/sortable';
+import { TodoItem } from './TodoItem';
+import { useTodoStore } from '../store';
+
+export function TodoList({ categoryId }: { categoryId: string }) {
+  const { todos, reorderTodos } = useTodoStore();
+  const categoryTodos = todos.filter((todo) => todo.categoryId === categoryId);
+
+  const handleDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event;
+    if (!over) return;
+
+    if (active.id !== over.id) {
+      const oldIndex = todos.findIndex((todo) => todo.id === active.id);
+      const newIndex = todos.findIndex((todo) => todo.id === over.id);
+      reorderTodos(arrayMove(todos, oldIndex, newIndex));
+    }
+  };
+
+  return (
+    <DndContext collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+      <SortableContext items={categoryTodos} strategy={verticalListSortingStrategy}>
+        <div className="space-y-2">
+          {categoryTodos.map((todo) => (
+            <TodoItem key={todo.id} todo={todo} />
+          ))}
+        </div>
+      </SortableContext>
+    </DndContext>
+  );
+}
+
+// src/App.tsx
+import { useState } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { ListTodo, Plus, Sparkles, ArrowRight } from 'lucide-react';
+import { AddTodo } from './components/AddTodo';
+import { TodoList } from './components/TodoList';
+import { useTodoStore } from './store';
+
+function Fireflies() {
+  return (
+    <div className="fixed inset-0 pointer-events-none">
+      {[...Array(20)].map((_, i) => (
+        <div
+          key={i}
+          className="firefly"
+          style={{
+            left: `${Math.random() * 100}%`,
+            top: `${Math.random() * 100}%`,
+            animationDelay: `${Math.random() * 2}s`,
+          }}
+        />
+      ))}
+    </div>
+  );
+}
+
+function WelcomePage({ onNext }: { onNext: (name: string) => void }) {
+  const [name, setName] = useState('');
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (name.trim()) {
+      onNext(name.trim());
+    }
+  };
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, y: -20 }}
+      className="max-w-lg mx-auto text-center"
+    >
+      <motion.div
+        initial={{ scale: 0 }}
+        animate={{ scale: 1 }}
+        transition={{ delay: 0.2 }}
+        className="w-20 h-20 mx-auto mb-6 rounded-full glass flex items-center justify-center"
+      >
+        <ListTodo className="w-10 h-10 text-blue-400" />
+      </motion.div>
+      <h1 className="text-4xl font-bold mb-4 bg-gradient-to-r from-blue-400 to-purple-400 bg-clip-text text-transparent">
+        Welcome to Flow Tasks
+      </h1>
+      <p className="text-slate-300 mb-8">Let's start by getting to know you</p>
+      <form onSubmit={handleSubmit} className="space-y-4">
+        <input
+          type="text"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder="Enter your name"
+          className="w-full px-4 py-3 rounded-lg bg-slate-800/50 border border-slate-700/50 text-slate-100 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-transparent text-center text-lg"
+        />
+        <motion.button
+          whileHover={{ scale: 1.02 }}
+          whileTap={{ scale: 0.98 }}
+          type="submit"
+          className="w-full px-6 py-3 bg-blue-500/20 border border-blue-500/50 text-blue-400 rounded-lg hover:bg-blue-500/30 focus:outline-none focus:ring-2 focus:ring-blue-500/50 transition-colors duration-200 flex items-center justify-center gap-2"
+        >
+          Get Started
+          <ArrowRight className="w-5 h-5" />
+        </motion.button>
+      </form>
+    </motion.div>
+  );
+}
+
+function OnboardingPage({ onComplete }: { onComplete: () => void }) {
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, y: -20 }}
+      className="max-w-lg mx-auto text-center"
+    >
+      <motion.div
+        initial={{ scale: 0 }}
+        animate={{ scale: 1 }}
+        transition={{ delay: 0.2 }}
+        className="w-20 h-20 mx-auto mb-6 rounded-full glass flex items-center justify-center"
+      >
+        <Sparkles className="w-10 h-10 text-yellow-400" />
+      </motion.div>
+      <h2 className="text-3xl font-bold mb-4 bg-gradient-to-r from-yellow-400 to-orange-400 bg-clip-text text-transparent">
+        Quick Tips
+      </h2>
+      <div className="space-y-6 mb-8 text-left">
+        <div className="glass p-4 rounded-lg">
+          <h3 className="font-semibold text-blue-400 mb-2">Create Categories</h3>
+          <p className="text-slate-300">Organize your tasks into custom categories like Work, Personal, or Shopping</p>
+        </div>
+        <div className="glass p-4 rounded-lg">
+          <h3 className="font-semibold text-green-400 mb-2">Drag & Drop</h3>
+          <p className="text-slate-300">Easily reorder your tasks by dragging them to your preferred position</p>
+        </div>
+        <div className="glass p-4 rounded-lg">
+          <h3 className="font-semibold text-purple-400 mb-2">Track Progress</h3>
+          <p className="text-slate-300">Mark tasks as complete and watch your productivity soar</p>
+        </div>
+      </div>
+      <motion.button
+        whileHover={{ scale: 1.02 }}
+        whileTap={{ scale: 0.98 }}
+        onClick={onComplete}
+        className="w-full px-6 py-3 bg-blue-500/20 border border-blue-500/50 text-blue-400 rounded-lg hover:bg-blue-500/30 focus:outline-none focus:ring-2 focus:ring-blue-500/50 transition-colors duration-200 flex items-center justify-center gap-2"
+      >
+        Let's Begin
+        <ArrowRight className="w-5 h-5" />
+      </motion.button>
+    </motion.div>
+  );
+}
+
+function MainApp() {
+  const [newCategory, setNewCategory] = useState('');
+  const { categories, addCategory, userName } = useTodoStore();
+
+  const handleAddCategory = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newCategory.trim()) return;
+    const colors = ['#60A5FA', '#F87171', '#34D399', '#FBBF24', '#A78BFA'];
+    const randomColor = colors[Math.floor(Math.random() * colors.length)];
+    addCategory(newCategory.trim(), randomColor);
+    setNewCategory('');
+  };
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, y: -20 }}
+      className="max-w-4xl mx-auto"
+    >
+      <motion.div className="glass rounded-2xl p-6 mb-8">
+        <div className="flex items-center gap-4 mb-6">
+          <div className="relative">
+            <ListTodo className="w-8 h-8 text-blue-400" />
+            <Sparkles className="w-4 h-4 text-yellow-300 absolute -top-1 -right-1" />
+          </div>
+          <div>
+            <h1 className="text-3xl font-bold bg-gradient-to-r from-blue-400 to-purple-400 bg-clip-text text-transparent">
+              Flow Tasks
+            </h1>
+            <p className="text-slate-400">Welcome back, {userName}</p>
+          </div>
+        </div>
+
+        <form onSubmit={handleAddCategory} className="flex gap-2">
+          <input
+            type="text"
+            value={newCategory}
+            onChange={(e) => setNewCategory(e.target.value)}
+            placeholder="Create new category..."
+            className="flex-1 px-4 py-2 rounded-lg bg-slate-800/50 border border-slate-700/50 text-slate-100 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-transparent"
+          />
+          <motion.button
+            whileHover={{ scale: 1.02 }}
+            whileTap={{ scale: 0.98 }}
+            type="submit"
+            className="px-4 py-2 bg-blue-500/20 border border-blue-500/50 text-blue-400 rounded-lg hover:bg-blue-500/30 focus:outline-none focus:ring-2 focus:ring-blue-500/50 transition-colors duration-200"
+          >
+            <Plus className="w-5 h-5" />
+          </motion.button>
+        </form>
+      </motion.div>
+
+      <div className="grid gap-6">
+        <AnimatePresence>
+          {categories.map((category, index) => (
+            <motion.div
+              key={category.id}
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              transition={{ delay: index * 0.1 }}
+              className="glass rounded-xl p-6"
+            >
+              <div className="flex items-center gap-2 mb-4">
+                <div
+                  className="w-3 h-3 rounded-full"
+                  style={{ backgroundColor: category.color }}
+                />
+                <h2 className="text-xl font-semibold text-slate-100">
+                  {category.name}
+                </h2>
+              </div>
+              <AddTodo categoryId={category.id} />
+              <div className="mt-4">
+                <TodoList categoryId={category.id} />
+              </div>
+            </motion.div>
+          ))}
+        </AnimatePresence>
+      </div>
+    </motion.div>
+  );
+}
+
+function App() {
+  const { userName, hasCompletedOnboarding, setUserName, completeOnboarding } = useTodoStore();
+
+  const handleSetName = (name: string) => {
+    setUserName(name);
+  };
+
+  return (
+    <div className="min-h-screen py-8 px-4 relative">
+      <Fireflies />
+      <AnimatePresence mode="wait">
+        {!userName && (
+          <WelcomePage onNext={handleSetName} />
+        )}
+        {userName && !hasCompletedOnboarding && (
+          <OnboardingPage onComplete={completeOnboarding} />
+        )}
+        {userName && hasCompletedOnboarding && (
+          <MainApp />
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
+
+export default App;
+
+// src/main.tsx
+import { StrictMode } from 'react';
+import { createRoot } from 'react-dom/client';
+import App from './App.tsx';
+import './index.css';
+
+createRoot(document.getElementById('root')!).render(
+  <StrictMode>
+    <App />
+  </StrictMode>
+);
+
+// src/index.css
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-gradient-to-br from-slate-900 to-slate-800 text-slate-100 min-h-screen;
+    background-image: url('https://images.unsplash.com/photo-1475070929565-c985b496cb9f?auto=format&fit=crop&q=80&w=2940');
+    background-size: cover;
+    background-position: center;
+    background-attachment: fixed;
+  }
+}
+
+.glass {
+  @apply bg-slate-900/40 backdrop-blur-lg border border-slate-700/50;
+}
+
+.firefly {
+  @apply absolute w-1.5 h-1.5 rounded-full bg-yellow-300/80 animate-firefly;
+}
+
+@keyframes firefly {
+  0%, 100% {
+    opacity: 0;
+    transform: translateY(0) scale(0.3);
+  }
+  50% {
+    opacity: 1;
+    transform: translateY(-20px) scale(1);
+  }
+}
+
+.animate-firefly {
+  animation: firefly 3s ease-in-out infinite;
+}
+
+// tailwind.config.js
+/** @type {import('tailwindcss').Config} */
+export default {
+  content: ['./index.html', './src/**/*.{js,ts,jsx,tsx}'],
+  theme: {
+    extend: {},
+  },
+  plugins: [],
+};
+
+// vite.config.ts
+import { defineConfig } from 'vite';
+import react from '@vitejs/plugin-react';
+
+export default defineConfig({
+  plugins: [react()],
+  optimizeDeps: {
+    exclude: ['lucide-react'],
+  },
+  server: {
+    host: true,
+    port: 5173,
+  },
+  preview: {
+    port: 5173,
+    host: true,
+  },
+});
+
+// index.html
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Create Todo List App with Categories</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
